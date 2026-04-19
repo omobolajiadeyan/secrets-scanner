@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Secrets Scanner - Detect exposed API keys, passwords, and credentials in source code.
-Author: Omobolaji Adeyanju
+Author: Omobolaji Adeyan
 """
 
 import re
