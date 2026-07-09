@@ -123,4 +123,4 @@ secrets-scanner/
 ## Author
 
 **Omobolaji Adeyan** — Cybersecurity Portfolio Project  
-[GitHub](https://github.com/omobolajiadeyan)
+[GitHub](https://github.com/omobolajiadeyan) · [Website](https://omobolajiadeyan.com)
