@@ -39,7 +39,7 @@ Exposed secrets in source code are one of the most common causes of data breache
 ## Installation
 
 ```bash
-git clone https://github.com/oadeyan/secrets-scanner.git
+git clone https://github.com/omobolajiadeyan/secrets-scanner.git
 cd secrets-scanner
 python --version  # Requires Python 3.10+
 ```
@@ -123,4 +123,4 @@ secrets-scanner/
 ## Author
 
 **Omobolaji Adeyan** — Cybersecurity Portfolio Project  
-[GitHub](https://github.com/oadeyan)
+[GitHub](https://github.com/omobolajiadeyan)
