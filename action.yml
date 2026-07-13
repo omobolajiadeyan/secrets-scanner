@@ -1,0 +1,37 @@
+name: FreNiMi Secrets Scanner
+description: Scan source code for exposed API keys, tokens, passwords, and credentials with SARIF output.
+author: Omobolaji Adeyan
+
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  path:
+    description: File or directory to scan.
+    required: false
+    default: "."
+  severity:
+    description: Minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW.
+    required: false
+    default: LOW
+  output:
+    description: SARIF output file path.
+    required: false
+    default: secrets-scanner.sarif
+
+outputs:
+  sarif:
+    description: Path to the generated SARIF report.
+    value: ${{ inputs.output }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run secrets scan
+      shell: bash
+      run: |
+        python "${{ github.action_path }}/scanner.py" "${{ inputs.path }}" \
+          --severity "${{ inputs.severity }}" \
+          --format sarif \
+          --output "${{ inputs.output }}"

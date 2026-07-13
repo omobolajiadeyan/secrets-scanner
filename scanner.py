@@ -11,7 +11,6 @@ import json
 import argparse
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Optional
 from patterns import SECRET_PATTERNS, SCAN_EXTENSIONS, SKIP_DIRS, SKIP_FILES
 
 # ANSI colour codes
@@ -171,6 +170,102 @@ def export_json(result: ScanResult, output_file: str):
     print(f"{GREEN}Results exported to {output_file}{RESET}")
 
 
+def sarif_level(severity: str) -> str:
+    return {
+        "CRITICAL": "error",
+        "HIGH": "error",
+        "MEDIUM": "warning",
+        "LOW": "note",
+    }.get(severity, "warning")
+
+
+def sarif_rule_id(secret_type: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", secret_type.lower()).strip("-")
+    return f"secret-{normalized}"
+
+
+def build_sarif(result: ScanResult) -> dict:
+    rules_by_id = {}
+    sarif_results = []
+
+    for finding in result.findings:
+        rule_id = sarif_rule_id(finding.secret_type)
+        rules_by_id.setdefault(
+            rule_id,
+            {
+                "id": rule_id,
+                "name": finding.secret_type,
+                "shortDescription": {"text": f"Potential {finding.secret_type} exposure"},
+                "fullDescription": {
+                    "text": (
+                        "A potential secret or credential was detected. "
+                        "Review the finding, rotate any exposed credential, "
+                        "and move secret material into an approved secret store."
+                    )
+                },
+                "defaultConfiguration": {"level": sarif_level(finding.severity)},
+                "properties": {"security-severity": finding.severity},
+            },
+        )
+        sarif_results.append(
+            {
+                "ruleId": rule_id,
+                "level": sarif_level(finding.severity),
+                "message": {
+                    "text": (
+                        f"{finding.secret_type} detected in source code. "
+                        "The matched value is redacted in this report."
+                    )
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": finding.file.replace("\\", "/")},
+                            "region": {
+                                "startLine": finding.line_number,
+                                "snippet": {"text": finding.line_content},
+                            },
+                        }
+                    }
+                ],
+                "properties": {
+                    "severity": finding.severity,
+                    "redactedMatch": finding.matched_text,
+                },
+            }
+        )
+
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "FreNiMi Secrets Scanner",
+                        "informationUri": "https://github.com/omobolajiadeyan/secrets-scanner",
+                        "rules": list(rules_by_id.values()),
+                    }
+                },
+                "results": sarif_results,
+            }
+        ],
+    }
+
+
+def export_sarif(result: ScanResult, output_file: str):
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(build_sarif(result), f, indent=2)
+    print(f"{GREEN}SARIF results exported to {output_file}{RESET}")
+
+
+def export_results(result: ScanResult, output_file: str, output_format: str):
+    if output_format == "sarif":
+        export_sarif(result, output_file)
+    else:
+        export_json(result, output_file)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Secrets Scanner - Find exposed credentials in source code",
@@ -181,12 +276,19 @@ Examples:
   python scanner.py /path/to/project           # Scan a specific path
   python scanner.py myfile.py --verbose        # Show full line content
   python scanner.py . --output results.json    # Export findings to JSON
+  python scanner.py . --format sarif -o results.sarif
   python scanner.py . --severity CRITICAL      # Only show critical findings
         """,
     )
     parser.add_argument("target", help="File or directory to scan")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show full line content")
-    parser.add_argument("--output", "-o", help="Export results to JSON file")
+    parser.add_argument("--output", "-o", help="Export results to a file")
+    parser.add_argument(
+        "--format",
+        choices=["json", "sarif"],
+        default="json",
+        help="Output format used with --output",
+    )
     parser.add_argument(
         "--severity",
         choices=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
@@ -211,7 +313,7 @@ Examples:
     print_results(result, verbose=args.verbose)
 
     if args.output:
-        export_json(result, args.output)
+        export_results(result, args.output, args.format)
 
     # Exit with non-zero code if critical findings exist (useful for CI/CD)
     if result.critical_count > 0:

@@ -5,7 +5,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scanner import Finding, ScanResult, redact, scan_content, scan_path, should_scan_file
+from scanner import (
+    Finding,
+    ScanResult,
+    build_sarif,
+    redact,
+    sarif_rule_id,
+    scan_content,
+    scan_path,
+    should_scan_file,
+)
 
 
 class ScanContentTests(unittest.TestCase):
@@ -138,6 +147,39 @@ class ScanResultTests(unittest.TestCase):
         self.assertEqual(result.total_findings, 3)
         self.assertEqual(result.critical_count, 2)
         self.assertEqual(result.high_count, 1)
+
+
+class SarifTests(unittest.TestCase):
+    def test_rule_id_is_stable_and_readable(self):
+        self.assertEqual(sarif_rule_id("AWS Access Key ID"), "secret-aws-access-key-id")
+
+    def test_sarif_export_uses_2_1_0_schema(self):
+        result = ScanResult(target=".")
+        result.findings = [
+            Finding(
+                file="config.py",
+                line_number=3,
+                line_content='AWS_KEY = "AKIA************MNOP"',
+                secret_type="AWS Access Key ID",
+                severity="CRITICAL",
+                matched_text="AKIA************MNOP",
+            )
+        ]
+
+        sarif = build_sarif(result)
+
+        self.assertEqual(sarif["version"], "2.1.0")
+        self.assertEqual(sarif["runs"][0]["tool"]["driver"]["name"], "FreNiMi Secrets Scanner")
+        self.assertEqual(sarif["runs"][0]["results"][0]["ruleId"], "secret-aws-access-key-id")
+        self.assertEqual(sarif["runs"][0]["results"][0]["level"], "error")
+
+    def test_sarif_does_not_expose_raw_secret(self):
+        raw_secret = "AKIAABCDEFGHIJKLMNOP"
+        findings = scan_content(f'AWS_KEY = "{raw_secret}"', "config.py")
+        sarif = build_sarif(ScanResult(target=".", findings=findings))
+
+        self.assertNotIn(raw_secret, str(sarif))
+        self.assertIn("AKIA************MNOP", str(sarif))
 
 
 if __name__ == "__main__":

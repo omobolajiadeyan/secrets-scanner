@@ -1,20 +1,27 @@
 # Secrets Scanner
 
-A lightweight command-line tool that detects exposed API keys, passwords, tokens, and credentials in source code — before they end up in production or a public repository.
+A lightweight Python security tool that detects exposed API keys, passwords,
+tokens, private keys, and connection strings before they reach production or a
+public repository.
+
+Built and maintained by [Omobolaji Adeyan](https://github.com/omobolajiadeyan)
+as part of a practical security-engineering toolkit.
 
 ## Why This Matters
 
-Exposed secrets in source code are one of the most common causes of data breaches. This tool helps developers catch credentials before they are committed or deployed.
+Exposed secrets are a common source of security incidents. This scanner helps
+developers catch obvious credential leaks locally, in pull requests, and in
+GitHub Code Scanning workflows.
 
 ## Features
 
-- Detects 15+ secret types including AWS keys, GitHub tokens, Stripe keys, database URLs, JWT tokens, and more
-- Scans entire directories recursively, respecting `.gitignore`-style skip rules
-- Color-coded severity levels: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`
-- Redacts matched values in output to prevent further exposure
-- JSON export for integration into CI/CD pipelines
-- Zero third-party dependencies — pure Python standard library
-- Returns exit code `2` when critical findings are found (CI/CD friendly)
+- Detects AWS keys, GitHub tokens, Stripe keys, private keys, database URLs,
+  JWTs, generic passwords, and more
+- Redacts matched values in terminal, JSON, and SARIF output
+- Exports JSON for automation and SARIF 2.1.0 for GitHub Code Scanning
+- Ships as a reusable GitHub Action
+- Uses only the Python standard library
+- Returns exit code `2` when critical findings are found
 
 ## Supported Secret Types
 
@@ -25,10 +32,10 @@ Exposed secrets in source code are one of the most common causes of data breache
 | GitHub Token | CRITICAL |
 | Slack Token | CRITICAL |
 | Stripe Secret Key | CRITICAL |
-| Private Key (RSA/EC/SSH) | CRITICAL |
+| Private Key Block | CRITICAL |
 | Database Connection String | CRITICAL |
 | Generic API Key | HIGH |
-| Generic Password/Secret | HIGH |
+| Generic Secret | HIGH |
 | Google API Key | HIGH |
 | SendGrid API Key | HIGH |
 | Discord Bot Token | HIGH |
@@ -41,86 +48,96 @@ Exposed secrets in source code are one of the most common causes of data breache
 ```bash
 git clone https://github.com/omobolajiadeyan/secrets-scanner.git
 cd secrets-scanner
-python --version  # Requires Python 3.10+
+python --version
 ```
 
-No pip install needed — uses only the Python standard library.
+Python 3.10+ is recommended. No third-party packages are required.
 
-## Usage
+## Local Usage
 
 ```bash
-# Scan current directory
+# Scan the current directory
 python scanner.py .
 
-# Scan a specific path
+# Scan a specific file or directory
 python scanner.py /path/to/project
 
-# Show full line content for each finding
+# Show redacted line context
 python scanner.py . --verbose
 
-# Only show CRITICAL findings
-python scanner.py . --severity CRITICAL
+# Only report HIGH and CRITICAL findings
+python scanner.py . --severity HIGH
 
-# Export results to JSON (for CI/CD or reporting)
+# Export JSON
 python scanner.py . --output results.json
 
-# Scan a single file
-python scanner.py config.py --verbose
+# Export SARIF for GitHub Code Scanning
+python scanner.py . --format sarif --output secrets-scanner.sarif
 ```
 
-## Example Output
-
-```
-Scanning: . ...
-
-============================================================
-  SECRETS SCANNER REPORT
-============================================================
-  Target    : .
-  Scanned   : 12 files
-  Skipped   : 3 files
-  Findings  : 3 total
-============================================================
-
-[CRITICAL] AWS Access Key ID
-  File   : sample/example_bad.py:6
-  Match  : AKIA****XAMPLE
-
-[CRITICAL] Database Connection String
-  File   : sample/example_bad.py:10
-  Match  : postg****5432/mydb
-
-[HIGH] Generic Secret
-  File   : sample/example_bad.py:18
-  Match  : MySup****d123
-
-Summary:
-  CRITICAL : 2
-  HIGH     : 1
-```
-
-## CI/CD Integration
+## GitHub Action Usage
 
 ```yaml
-# .github/workflows/secrets-check.yml
-- name: Scan for secrets
-  run: python scanner.py . --severity HIGH
-  # Exits with code 2 if CRITICAL findings are found
+name: Secrets Scanner
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: omobolajiadeyan/secrets-scanner@main
+        with:
+          path: .
+          severity: HIGH
+          output: secrets-scanner.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: secrets-scanner.sarif
 ```
+
+## Output Safety
+
+The scanner redacts matched values before printing or exporting results. SARIF
+contains the finding type, severity, file path, line number, and redacted
+context, but not the raw secret.
+
+If you find a real secret in a repository, rotate it immediately. Removing it
+from the latest commit is not enough because it may still exist in Git history.
 
 ## Project Structure
 
-```
+```text
 secrets-scanner/
-├── scanner.py       # Main CLI entrypoint
-├── patterns.py      # Regex patterns for each secret type
-├── requirements.txt # No dependencies needed
-├── sample/
-│   └── example_bad.py   # Intentionally insecure file for testing
-└── README.md
+|-- action.yml
+|-- scanner.py
+|-- patterns.py
+|-- sample/
+|   `-- example_bad.py
+|-- tests/
+|   `-- test_scanner.py
+`-- README.md
 ```
+
+## Limits
+
+This tool uses deterministic patterns and should be treated as a lightweight
+guardrail, not a complete secret-management program. It may miss unusual
+formats and may flag false positives. Use it alongside secret rotation,
+least-privilege credentials, branch protection, code review, and platform-level
+secret scanning.
 
 ## Author
 
-**Omobolaji Adeyan** — Cybersecurity Portfolio Project  
-[GitHub](https://github.com/omobolajiadeyan) · [Website](https://omobolajiadeyan.com)
+**Omobolaji Adeyan**  
+Security Engineer and open-source security tooling maintainer  
+[GitHub](https://github.com/omobolajiadeyan) | [Website](https://omobolajiadeyan.com)
