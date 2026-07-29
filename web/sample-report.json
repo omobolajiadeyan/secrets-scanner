@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "risk_level": "CRITICAL",
+    "severity_counts": {
+      "CRITICAL": 1,
+      "HIGH": 1,
+      "MEDIUM": 0,
+      "LOW": 0
+    },
+    "secret_type_counts": {
+      "Database Connection String": 1,
+      "Generic API Key": 1
+    },
+    "redaction": "matched values are redacted before export"
+  },
+  "target": "sample/",
+  "files_scanned": 1,
+  "files_skipped": 0,
+  "total_findings": 2,
+  "findings": [
+    {
+      "file": "sample/example_bad.py",
+      "line_number": 14,
+      "line_content": "api_*******************************************EAL\"",
+      "secret_type": "Generic API Key",
+      "severity": "HIGH",
+      "matched_text": "api_*******************************************EAL\""
+    },
+    {
+      "file": "sample/example_bad.py",
+      "line_number": 11,
+      "line_content": "DATABASE_URL = \"post***********************************************mydb\"",
+      "secret_type": "Database Connection String",
+      "severity": "CRITICAL",
+      "matched_text": "post***********************************************mydb"
+    }
+  ]
+}

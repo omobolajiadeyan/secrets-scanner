@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Secrets Scanner Report Viewer</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>Secrets Scanner</h1>
+        <p>Redacted credential findings for review and CI evidence</p>
+      </div>
+      <label class="upload"><input id="report-input" type="file" accept=".json,application/json" />Load JSON</label>
+    </header>
+    <section class="summary">
+      <article><span>Risk</span><strong id="risk">-</strong></article>
+      <article><span>Findings</span><strong id="findings-total">-</strong></article>
+      <article><span>Files scanned</span><strong id="files-scanned">-</strong></article>
+      <article><span>Redaction</span><strong id="redaction">On</strong></article>
+    </section>
+    <section class="layout">
+      <aside class="panel">
+        <h2>Severity</h2>
+        <div id="severity-list" class="metric-list"></div>
+        <h2>Secret Types</h2>
+        <div id="type-list" class="metric-list"></div>
+      </aside>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Findings</h2>
+          <select id="severity-filter">
+            <option value="ALL">All severities</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="HIGH">High</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
+          </select>
+        </div>
+        <div id="findings" class="findings"></div>
+      </section>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

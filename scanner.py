@@ -58,6 +58,30 @@ class ScanResult:
     def high_count(self):
         return sum(1 for f in self.findings if f.severity == "HIGH")
 
+    @property
+    def severity_counts(self):
+        counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for finding in self.findings:
+            counts[finding.severity] = counts.get(finding.severity, 0) + 1
+        return counts
+
+    @property
+    def secret_type_counts(self):
+        counts = {}
+        for finding in self.findings:
+            counts[finding.secret_type] = counts.get(finding.secret_type, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+    @property
+    def risk_level(self):
+        if self.critical_count:
+            return "CRITICAL"
+        if self.high_count:
+            return "HIGH"
+        if self.total_findings:
+            return "MEDIUM"
+        return "LOW"
+
 
 def redact(text: str, match: str) -> str:
     """Partially redact a matched secret for safe display."""
@@ -159,6 +183,12 @@ def print_results(result: ScanResult, verbose: bool = False):
 
 def export_json(result: ScanResult, output_file: str):
     data = {
+        "summary": {
+            "risk_level": result.risk_level,
+            "severity_counts": result.severity_counts,
+            "secret_type_counts": result.secret_type_counts,
+            "redaction": "matched values are redacted before export",
+        },
         "target": result.target,
         "files_scanned": result.files_scanned,
         "files_skipped": result.files_skipped,

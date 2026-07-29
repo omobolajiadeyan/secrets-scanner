@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from scanner import (
     Finding,
     ScanResult,
     build_sarif,
+    export_json,
     redact,
     sarif_rule_id,
     scan_content,
@@ -148,6 +150,18 @@ class ScanResultTests(unittest.TestCase):
         self.assertEqual(result.critical_count, 2)
         self.assertEqual(result.high_count, 1)
 
+    def test_summary_fields_support_report_viewer(self):
+        result = ScanResult(target=".")
+        result.findings = [
+            Finding("f", 1, "x", "AWS Access Key ID", "CRITICAL", "AKIA************MNOP"),
+            Finding("f", 2, "x", "GitHub Token", "CRITICAL", "ghp_********************************aaaa"),
+            Finding("f", 3, "x", "Generic API Key", "HIGH", "api_************1234"),
+        ]
+
+        self.assertEqual(result.risk_level, "CRITICAL")
+        self.assertEqual(result.severity_counts["CRITICAL"], 2)
+        self.assertEqual(result.secret_type_counts["AWS Access Key ID"], 1)
+
 
 class SarifTests(unittest.TestCase):
     def test_rule_id_is_stable_and_readable(self):
@@ -180,6 +194,25 @@ class SarifTests(unittest.TestCase):
 
         self.assertNotIn(raw_secret, str(sarif))
         self.assertIn("AKIA************MNOP", str(sarif))
+
+
+class JsonExportTests(unittest.TestCase):
+    def test_json_export_includes_summary_and_redacted_values(self):
+        raw_secret = "AKIAABCDEFGHIJKLMNOP"
+        findings = scan_content(f'AWS_KEY = "{raw_secret}"', "config.py")
+        result = ScanResult(target=".", files_scanned=1, findings=findings)
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            export_json(result, path)
+            data = json.loads(Path(path).read_text())
+        finally:
+            Path(path).unlink()
+
+        self.assertEqual(data["summary"]["risk_level"], "CRITICAL")
+        self.assertEqual(data["summary"]["severity_counts"]["CRITICAL"], 1)
+        self.assertNotIn(raw_secret, json.dumps(data))
 
 
 if __name__ == "__main__":
