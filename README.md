@@ -20,8 +20,22 @@ GitHub Code Scanning workflows.
 - Redacts matched values in terminal, JSON, and SARIF output
 - Exports JSON for automation and SARIF 2.1.0 for GitHub Code Scanning
 - Ships as a reusable GitHub Action
+- Includes a browser report viewer for redacted JSON evidence
 - Uses only the Python standard library
 - Returns exit code `2` when critical findings are found
+
+## Project Evidence
+
+The sample evidence run scans a public-safe fixture containing fake
+credential-shaped strings, redacts matched values, and produces reviewable JSON
+and SARIF output.
+
+![Secrets Scanner evidence](docs/assets/secrets-scanner-evidence.svg)
+
+See [Project Evidence](docs/PROJECT_EVIDENCE.md) for exact commands, expected
+sample counts, redaction boundaries, and output safety notes. External
+reviewers can use the [Evaluator Guide](docs/EVALUATOR_GUIDE.md) for a
+five-minute review.
 
 ## Supported Secret Types
 
@@ -73,7 +87,26 @@ python scanner.py . --output results.json
 
 # Export SARIF for GitHub Code Scanning
 python scanner.py . --format sarif --output secrets-scanner.sarif
+
+# Run the bundled public-safe sample
+python scanner.py sample/ --verbose
+python scanner.py sample/ --output web/sample-report.json
 ```
+
+## Browser Report Viewer
+
+The `web/` folder provides a lightweight viewer for exported JSON reports. It
+loads the checked-in `web/sample-report.json` by default and can load a fresh
+export from the scanner.
+
+```bash
+python scanner.py sample/ --output web/sample-report.json
+cd web
+python3 -m http.server 8080
+```
+
+Open `http://127.0.0.1:8080/` to review severity counts, secret-type counts,
+redacted findings, and file/line evidence.
 
 ## GitHub Action Usage
 
@@ -121,10 +154,18 @@ secrets-scanner/
 |-- action.yml
 |-- scanner.py
 |-- patterns.py
+|-- docs/
+|   |-- EVALUATOR_GUIDE.md
+|   `-- PROJECT_EVIDENCE.md
 |-- sample/
 |   `-- example_bad.py
 |-- tests/
 |   `-- test_scanner.py
+|-- web/
+|   |-- index.html
+|   |-- app.js
+|   |-- style.css
+|   `-- sample-report.json
 `-- README.md
 ```
 
