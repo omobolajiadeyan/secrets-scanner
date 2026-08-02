@@ -17,6 +17,11 @@ Snapshot verified on July 29, 2026:
 - GitHub Action: reusable composite action for CI and Code Scanning.
 - Browser review path: `web/` report viewer for exported JSON.
 - Runtime dependency posture: Python standard library only.
+- Optional live verification (`--verify`): checks GitHub, Slack, Stripe,
+  SendGrid, and Discord findings against their own provider API to confirm
+  whether the credential is still active. Off by default. Redaction guarantee
+  holds even with `--verify` enabled — see `test_sarif_does_not_expose_raw_secret_even_with_verify_enabled`
+  in `tests/test_scanner.py`.
 
 ## Reproducible Demo
 

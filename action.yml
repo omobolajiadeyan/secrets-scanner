@@ -19,6 +19,14 @@ inputs:
     description: SARIF output file path.
     required: false
     default: secrets-scanner.sarif
+  verify:
+    description: >-
+      Make a live API call to each secret's own provider (GitHub, Slack, Stripe,
+      SendGrid, Discord) to check whether it is still active. Sends the detected
+      credential over the network to that provider's verification endpoint only;
+      never logged or written to output. Default false.
+    required: false
+    default: "false"
 
 outputs:
   sarif:
@@ -31,7 +39,8 @@ runs:
     - name: Run secrets scan
       shell: bash
       run: |
-        python "${{ github.action_path }}/scanner.py" "${{ inputs.path }}" \
-          --severity "${{ inputs.severity }}" \
-          --format sarif \
-          --output "${{ inputs.output }}"
+        ARGS=(--severity "${{ inputs.severity }}" --format sarif --output "${{ inputs.output }}")
+        if [ "${{ inputs.verify }}" = "true" ]; then
+          ARGS+=(--verify)
+        fi
+        python "${{ github.action_path }}/scanner.py" "${{ inputs.path }}" "${ARGS[@]}"

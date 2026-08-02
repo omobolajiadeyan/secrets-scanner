@@ -17,11 +17,19 @@ Exposed secrets are a common source of security incidents. This scanner helps
 developers catch obvious credential leaks locally, in pull requests, and in
 GitHub Code Scanning workflows.
 
+Pattern-based scanners are noisy: most findings are old, rotated, or
+placeholder-shaped strings, not live credentials. The optional `--verify`
+flag closes that gap by checking whether a detected secret is actually still
+active, so triage effort goes to what matters first.
+
 ## Features
 
 - Detects AWS keys, GitHub tokens, Stripe keys, private keys, database URLs,
   JWTs, generic passwords, and more
-- Redacts matched values in terminal, JSON, and SARIF output
+- Optional `--verify` flag confirms whether GitHub, Slack, Stripe, SendGrid,
+  and Discord credentials are still live before you triage them
+- Redacts matched values in terminal, JSON, and SARIF output — even with
+  `--verify` enabled, the raw secret is never logged or written anywhere
 - Exports JSON for automation and SARIF 2.1.0 for GitHub Code Scanning
 - Ships as a reusable GitHub Action
 - Includes a browser report viewer for redacted JSON evidence
@@ -43,23 +51,58 @@ five-minute review.
 
 ## Supported Secret Types
 
-| Secret Type | Severity |
-|---|---|
-| AWS Access Key ID | CRITICAL |
-| AWS Secret Access Key | CRITICAL |
-| GitHub Token | CRITICAL |
-| Slack Token | CRITICAL |
-| Stripe Secret Key | CRITICAL |
-| Private Key Block | CRITICAL |
-| Database Connection String | CRITICAL |
-| Generic API Key | HIGH |
-| Generic Secret | HIGH |
-| Google API Key | HIGH |
-| SendGrid API Key | HIGH |
-| Discord Bot Token | HIGH |
-| Basic Auth in URL | HIGH |
-| Twilio Account SID | HIGH |
-| JWT Token | MEDIUM |
+| Secret Type | Severity | Live Verification |
+|---|---|---|
+| AWS Access Key ID | CRITICAL | — |
+| AWS Secret Access Key | CRITICAL | — |
+| GitHub Token | CRITICAL | ✅ |
+| Slack Token | CRITICAL | ✅ |
+| Stripe Secret Key | CRITICAL | ✅ |
+| Private Key Block | CRITICAL | — |
+| Database Connection String | CRITICAL | — |
+| Generic API Key | HIGH | — |
+| Generic Secret | HIGH | — |
+| Google API Key | HIGH | — |
+| SendGrid API Key | HIGH | ✅ |
+| Discord Bot Token | HIGH | ✅ |
+| Basic Auth in URL | HIGH | — |
+| Twilio Account SID | HIGH | — |
+| JWT Token | MEDIUM | — |
+
+AWS and Twilio aren't verifiable from a single matched string — both need a
+paired secret (access key + secret key, or account SID + auth token) that the
+scanner has no reliable way to correlate across a file. Rather than guess,
+verification is left unsupported for those types.
+
+## Live Credential Verification (`--verify`, opt-in)
+
+```bash
+python scanner.py . --verify
+```
+
+When a detected secret's type supports it, the scanner makes a single,
+short-timeout (5s) API call **directly to that credential's own provider**
+(never a third party) to check whether it's still active:
+
+- **GitHub Token** → `GET api.github.com/user`
+- **Slack Token** → `POST slack.com/api/auth.test`
+- **Stripe Secret Key** → `GET api.stripe.com/v1/balance`
+- **SendGrid API Key** → `GET api.sendgrid.com/v3/user/account`
+- **Discord Bot Token** → `GET discord.com/api/v10/users/@me`
+
+Each finding is labeled `verified-live`, `verified-invalid`,
+`verification-error` (network/timeout — treated as inconclusive, not a
+verdict), or `unverified` (type not supported). A `verified-live` finding is
+always reported as CRITICAL regardless of its base severity, in both the
+terminal summary and SARIF output.
+
+**This is opt-in and off by default.** Running it means detected credentials
+are sent over the network to their provider's own verification endpoint —
+still never logged, printed, or written to any output file, but it is real
+network activity worth knowing about before enabling it in a shared CI
+pipeline. In `--verify` mode, the raw match is held in memory only for the
+duration of that one request, then discarded; only the redacted value and the
+verification status are ever recorded.
 
 ## Installation
 
@@ -91,6 +134,9 @@ python scanner.py . --output results.json
 
 # Export SARIF for GitHub Code Scanning
 python scanner.py . --format sarif --output secrets-scanner.sarif
+
+# Also check whether verifiable secret types are still active
+python scanner.py . --verify
 
 # Run the bundled public-safe sample
 python scanner.py sample/ --verbose
@@ -136,6 +182,7 @@ jobs:
           path: .
           severity: HIGH
           output: secrets-scanner.sarif
+          verify: "false" # set "true" to check GitHub/Slack/Stripe/SendGrid/Discord secrets are still active
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -146,7 +193,9 @@ jobs:
 
 The scanner redacts matched values before printing or exporting results. SARIF
 contains the finding type, severity, file path, line number, and redacted
-context, but not the raw secret.
+context, but not the raw secret. This holds true with `--verify` enabled too —
+see [Live Credential Verification](#live-credential-verification---verify-opt-in)
+for exactly what that flag sends over the network and what it never records.
 
 If you find a real secret in a repository, rotate it immediately. Removing it
 from the latest commit is not enough because it may still exist in Git history.
@@ -158,13 +207,15 @@ secrets-scanner/
 |-- action.yml
 |-- scanner.py
 |-- patterns.py
+|-- verify.py
 |-- docs/
 |   |-- EVALUATOR_GUIDE.md
 |   `-- PROJECT_EVIDENCE.md
 |-- sample/
 |   `-- example_bad.py
 |-- tests/
-|   `-- test_scanner.py
+|   |-- test_scanner.py
+|   `-- test_verify.py
 |-- web/
 |   |-- index.html
 |   |-- app.js
@@ -179,7 +230,10 @@ This tool uses deterministic patterns and should be treated as a lightweight
 guardrail, not a complete secret-management program. It may miss unusual
 formats and may flag false positives. Use it alongside secret rotation,
 least-privilege credentials, branch protection, code review, and platform-level
-secret scanning.
+secret scanning. Live verification covers 5 of 15 secret types (see the table
+above) and treats network errors as inconclusive, not as proof a credential is
+safe — an unreachable provider is reported as `verification-error`, never as
+verified-inactive.
 
 ## Part of the Security Automation Toolkit
 
