@@ -12,6 +12,7 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from patterns import SECRET_PATTERNS, SCAN_EXTENSIONS, SKIP_DIRS, SKIP_FILES
+from verify import NOT_CHECKED, VERIFIED_LIVE, verify_secret
 
 # ANSI colour codes
 RED     = "\033[91m"
@@ -28,6 +29,20 @@ SEVERITY_COLOR = {
     "LOW": GREEN,
 }
 
+VERIFICATION_LABEL = {
+    "verified-live": "VERIFIED LIVE — ROTATE NOW",
+    "verified-invalid": "verified inactive",
+    "verification-error": "verification inconclusive",
+    "unverified": "verification not supported for this type",
+}
+
+VERIFICATION_COLOR = {
+    "verified-live": RED,
+    "verified-invalid": GREEN,
+    "verification-error": YELLOW,
+    "unverified": RESET,
+}
+
 
 @dataclass
 class Finding:
@@ -37,6 +52,18 @@ class Finding:
     secret_type: str
     severity: str
     matched_text: str
+    verification: str = NOT_CHECKED
+
+    @property
+    def effective_severity(self) -> str:
+        """Severity after accounting for live verification.
+
+        A confirmed-active credential is always CRITICAL, regardless of the
+        pattern's baseline severity.
+        """
+        if self.verification == VERIFIED_LIVE:
+            return "CRITICAL"
+        return self.severity
 
 
 @dataclass
@@ -52,17 +79,21 @@ class ScanResult:
 
     @property
     def critical_count(self):
-        return sum(1 for f in self.findings if f.severity == "CRITICAL")
+        return sum(1 for f in self.findings if f.effective_severity == "CRITICAL")
 
     @property
     def high_count(self):
-        return sum(1 for f in self.findings if f.severity == "HIGH")
+        return sum(1 for f in self.findings if f.effective_severity == "HIGH")
+
+    @property
+    def verified_live_count(self):
+        return sum(1 for f in self.findings if f.verification == VERIFIED_LIVE)
 
     @property
     def severity_counts(self):
         counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
         for finding in self.findings:
-            counts[finding.severity] = counts.get(finding.severity, 0) + 1
+            counts[finding.effective_severity] = counts.get(finding.effective_severity, 0) + 1
         return counts
 
     @property
@@ -90,7 +121,7 @@ def redact(text: str, match: str) -> str:
     return match[:4] + "*" * (len(match) - 8) + match[-4:]
 
 
-def scan_content(content: str, filepath: str) -> list[Finding]:
+def scan_content(content: str, filepath: str, verify: bool = False) -> list[Finding]:
     findings = []
     lines = content.splitlines()
 
@@ -100,6 +131,10 @@ def scan_content(content: str, filepath: str) -> list[Finding]:
             match = regex.search(line)
             if match:
                 matched_text = match.group(0)
+                # Verify (if requested) using the raw match while it is
+                # still in scope, then immediately redact. The raw value is
+                # never stored on the Finding or written anywhere.
+                verification = verify_secret(pattern_info["name"], matched_text) if verify else NOT_CHECKED
                 redacted_line = line.replace(matched_text, redact(line, matched_text))
                 findings.append(Finding(
                     file=filepath,
@@ -108,6 +143,7 @@ def scan_content(content: str, filepath: str) -> list[Finding]:
                     secret_type=pattern_info["name"],
                     severity=pattern_info["severity"],
                     matched_text=redact(matched_text, matched_text),
+                    verification=verification,
                 ))
 
     return findings
@@ -121,7 +157,7 @@ def should_scan_file(path: Path) -> bool:
     return True
 
 
-def scan_path(target: str) -> ScanResult:
+def scan_path(target: str, verify: bool = False) -> ScanResult:
     result = ScanResult(target=target)
     target_path = Path(target)
 
@@ -129,7 +165,7 @@ def scan_path(target: str) -> ScanResult:
         try:
             content = target_path.read_text(encoding="utf-8", errors="ignore")
             result.files_scanned += 1
-            result.findings.extend(scan_content(content, str(target_path)))
+            result.findings.extend(scan_content(content, str(target_path), verify=verify))
         except Exception:
             result.files_skipped += 1
         return result
@@ -146,7 +182,7 @@ def scan_path(target: str) -> ScanResult:
             try:
                 content = filepath.read_text(encoding="utf-8", errors="ignore")
                 result.files_scanned += 1
-                result.findings.extend(scan_content(content, str(filepath)))
+                result.findings.extend(scan_content(content, str(filepath), verify=verify))
             except Exception:
                 result.files_skipped += 1
 
@@ -168,32 +204,45 @@ def print_results(result: ScanResult, verbose: bool = False):
         return
 
     for finding in result.findings:
-        color = SEVERITY_COLOR.get(finding.severity, RESET)
-        print(f"\n{color}{BOLD}[{finding.severity}]{RESET} {finding.secret_type}")
+        color = SEVERITY_COLOR.get(finding.effective_severity, RESET)
+        print(f"\n{color}{BOLD}[{finding.effective_severity}]{RESET} {finding.secret_type}")
         print(f"  File   : {finding.file}:{finding.line_number}")
         if verbose:
             print(f"  Line   : {finding.line_content}")
         print(f"  Match  : {finding.matched_text}")
+        if finding.verification != NOT_CHECKED:
+            vcolor = VERIFICATION_COLOR.get(finding.verification, RESET)
+            label = VERIFICATION_LABEL.get(finding.verification, finding.verification)
+            print(f"  Verify : {vcolor}{label}{RESET}")
 
     print(f"\n{BOLD}Summary:{RESET}")
     print(f"  {RED}CRITICAL : {result.critical_count}{RESET}")
     print(f"  {YELLOW}HIGH     : {result.high_count}{RESET}")
+    if result.verified_live_count:
+        print(f"  {RED}{BOLD}VERIFIED LIVE : {result.verified_live_count} — rotate these immediately{RESET}")
     print()
 
 
 def export_json(result: ScanResult, output_file: str):
+    findings = []
+    for f in result.findings:
+        entry = asdict(f)
+        entry["effective_severity"] = f.effective_severity
+        findings.append(entry)
+
     data = {
         "summary": {
             "risk_level": result.risk_level,
             "severity_counts": result.severity_counts,
             "secret_type_counts": result.secret_type_counts,
+            "verified_live_count": result.verified_live_count,
             "redaction": "matched values are redacted before export",
         },
         "target": result.target,
         "files_scanned": result.files_scanned,
         "files_skipped": result.files_skipped,
         "total_findings": result.total_findings,
-        "findings": [asdict(f) for f in result.findings],
+        "findings": findings,
     }
     with open(output_file, "w") as f:
         json.dump(data, f, indent=2)
@@ -233,20 +282,21 @@ def build_sarif(result: ScanResult) -> dict:
                         "and move secret material into an approved secret store."
                     )
                 },
-                "defaultConfiguration": {"level": sarif_level(finding.severity)},
-                "properties": {"security-severity": finding.severity},
+                "defaultConfiguration": {"level": sarif_level(finding.effective_severity)},
+                "properties": {"security-severity": finding.effective_severity},
             },
         )
+        message = f"{finding.secret_type} detected in source code. The matched value is redacted in this report."
+        if finding.verification == "verified-live":
+            message += " This credential was confirmed ACTIVE by a live check against its provider — rotate it immediately."
+        elif finding.verification == "verified-invalid":
+            message += " A live check confirmed this credential is no longer active."
+
         sarif_results.append(
             {
                 "ruleId": rule_id,
-                "level": sarif_level(finding.severity),
-                "message": {
-                    "text": (
-                        f"{finding.secret_type} detected in source code. "
-                        "The matched value is redacted in this report."
-                    )
-                },
+                "level": sarif_level(finding.effective_severity),
+                "message": {"text": message},
                 "locations": [
                     {
                         "physicalLocation": {
@@ -259,8 +309,9 @@ def build_sarif(result: ScanResult) -> dict:
                     }
                 ],
                 "properties": {
-                    "severity": finding.severity,
+                    "severity": finding.effective_severity,
                     "redactedMatch": finding.matched_text,
+                    "verificationStatus": finding.verification,
                 },
             }
         )
@@ -308,11 +359,22 @@ Examples:
   python scanner.py . --output results.json    # Export findings to JSON
   python scanner.py . --format sarif -o results.sarif
   python scanner.py . --severity CRITICAL      # Only show critical findings
+  python scanner.py . --verify                 # Also check if secrets are still active
         """,
     )
     parser.add_argument("target", help="File or directory to scan")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show full line content")
     parser.add_argument("--output", "-o", help="Export results to a file")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=(
+            "Make a live API call to each secret's own provider (GitHub, Slack, Stripe, "
+            "SendGrid, Discord) to check whether it is still active. Sends the detected "
+            "credential over the network to that provider's verification endpoint only; "
+            "the raw value is never logged, printed, or written to any output file."
+        ),
+    )
     parser.add_argument(
         "--format",
         choices=["json", "sarif"],
@@ -331,8 +393,11 @@ Examples:
         print(f"{RED}Error: Path '{args.target}' does not exist.{RESET}")
         sys.exit(1)
 
-    print(f"{CYAN}Scanning: {args.target} ...{RESET}")
-    result = scan_path(args.target)
+    if args.verify:
+        print(f"{CYAN}Scanning: {args.target} (with live verification) ...{RESET}")
+    else:
+        print(f"{CYAN}Scanning: {args.target} ...{RESET}")
+    result = scan_path(args.target, verify=args.verify)
 
     # Apply severity filter
     if args.severity:

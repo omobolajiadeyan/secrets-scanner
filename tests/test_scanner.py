@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -17,6 +18,7 @@ from scanner import (
     scan_path,
     should_scan_file,
 )
+import verify
 
 
 class ScanContentTests(unittest.TestCase):
@@ -72,6 +74,33 @@ class ScanContentTests(unittest.TestCase):
         findings = scan_content('key = "AKIAABCDEFGHIJKLMNOP"', "config.py")
         self.assertNotIn("AKIAABCDEFGHIJKLMNOP", findings[0].matched_text)
         self.assertIn("*", findings[0].matched_text)
+
+    def test_verify_false_by_default_and_no_network_call(self):
+        with patch("scanner.verify_secret") as mock_verify:
+            findings = scan_content('key = "AKIAABCDEFGHIJKLMNOP"', "config.py")
+        mock_verify.assert_not_called()
+        self.assertEqual(findings[0].verification, "not-checked")
+
+    def test_verify_true_calls_verifier_and_records_status(self):
+        token = "ghp_" + ("a" * 36)
+        with patch("scanner.verify_secret", return_value="verified-live") as mock_verify:
+            findings = scan_content(f'export GITHUB_TOKEN={token}', "deploy.sh", verify=True)
+        mock_verify.assert_called_once_with("GitHub Token", token)
+        self.assertEqual(findings[0].verification, "verified-live")
+
+    def test_verify_true_never_leaks_raw_secret_even_when_verifying(self):
+        raw_secret = "SG." + ("a" * 22) + "." + ("b" * 43)
+        with patch("scanner.verify_secret", return_value="verified-live"):
+            findings = scan_content(f'SENDGRID_KEY = "{raw_secret}"', "mail.py", verify=True)
+        self.assertNotIn(raw_secret, findings[0].matched_text)
+        self.assertNotIn(raw_secret, findings[0].line_content)
+
+    def test_verified_live_escalates_effective_severity_to_critical(self):
+        raw_secret = "SG." + ("a" * 22) + "." + ("b" * 43)
+        with patch("scanner.verify_secret", return_value="verified-live"):
+            findings = scan_content(f'SENDGRID_KEY = "{raw_secret}"', "mail.py", verify=True)
+        self.assertEqual(findings[0].severity, "HIGH")
+        self.assertEqual(findings[0].effective_severity, "CRITICAL")
 
 
 class RedactTests(unittest.TestCase):
@@ -162,6 +191,17 @@ class ScanResultTests(unittest.TestCase):
         self.assertEqual(result.severity_counts["CRITICAL"], 2)
         self.assertEqual(result.secret_type_counts["AWS Access Key ID"], 1)
 
+    def test_verified_live_finding_counts_as_critical_in_summary(self):
+        result = ScanResult(target=".")
+        result.findings = [
+            Finding("f", 1, "x", "SendGrid API Key", "HIGH", "SG.****", verification="verified-live"),
+        ]
+
+        self.assertEqual(result.risk_level, "CRITICAL")
+        self.assertEqual(result.critical_count, 1)
+        self.assertEqual(result.high_count, 0)
+        self.assertEqual(result.verified_live_count, 1)
+
 
 class SarifTests(unittest.TestCase):
     def test_rule_id_is_stable_and_readable(self):
@@ -194,6 +234,16 @@ class SarifTests(unittest.TestCase):
 
         self.assertNotIn(raw_secret, str(sarif))
         self.assertIn("AKIA************MNOP", str(sarif))
+
+    def test_sarif_does_not_expose_raw_secret_even_with_verify_enabled(self):
+        raw_secret = "SG." + ("a" * 22) + "." + ("b" * 43)
+        with patch("scanner.verify_secret", return_value="verified-live"):
+            findings = scan_content(f'SENDGRID_KEY = "{raw_secret}"', "mail.py", verify=True)
+        sarif = build_sarif(ScanResult(target=".", findings=findings))
+
+        self.assertNotIn(raw_secret, str(sarif))
+        self.assertEqual(sarif["runs"][0]["results"][0]["properties"]["verificationStatus"], "verified-live")
+        self.assertEqual(sarif["runs"][0]["results"][0]["level"], "error")
 
 
 class JsonExportTests(unittest.TestCase):
