@@ -85,7 +85,7 @@ SCAN_EXTENSIONS = {
     ".py", ".js", ".ts", ".jsx", ".tsx", ".env", ".yaml", ".yml",
     ".json", ".toml", ".ini", ".cfg", ".conf", ".sh", ".bash",
     ".php", ".rb", ".go", ".java", ".cs", ".cpp", ".c", ".h",
-    ".xml", ".properties", ".gradle", ".tf", ".tfvars",
+    ".xml", ".properties", ".gradle", ".tf", ".tfvars", ".pem", ".key",
 }
 
 # Paths to always skip

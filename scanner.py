@@ -72,6 +72,7 @@ class ScanResult:
     files_scanned: int = 0
     files_skipped: int = 0
     findings: list = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def total_findings(self):
@@ -161,16 +162,27 @@ def scan_path(target: str, verify: bool = False) -> ScanResult:
     result = ScanResult(target=target)
     target_path = Path(target)
 
+    if not target_path.exists():
+        result.errors.append(f"{target}: path does not exist")
+        return result
+
     if target_path.is_file():
+        if not should_scan_file(target_path):
+            result.files_skipped += 1
+            return result
         try:
             content = target_path.read_text(encoding="utf-8", errors="ignore")
             result.files_scanned += 1
             result.findings.extend(scan_content(content, str(target_path), verify=verify))
-        except Exception:
+        except OSError as error:
             result.files_skipped += 1
+            result.errors.append(f"{target_path}: {error}")
         return result
 
-    for root, dirs, files in os.walk(target_path):
+    def record_walk_error(error: OSError) -> None:
+        result.errors.append(f"{error.filename or target_path}: {error}")
+
+    for root, dirs, files in os.walk(target_path, onerror=record_walk_error):
         # Prune skip dirs in-place so os.walk doesn't descend into them
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
@@ -183,8 +195,9 @@ def scan_path(target: str, verify: bool = False) -> ScanResult:
                 content = filepath.read_text(encoding="utf-8", errors="ignore")
                 result.files_scanned += 1
                 result.findings.extend(scan_content(content, str(filepath), verify=verify))
-            except Exception:
+            except OSError as error:
                 result.files_skipped += 1
+                result.errors.append(f"{filepath}: {error}")
 
     return result
 
@@ -197,10 +210,16 @@ def print_results(result: ScanResult, verbose: bool = False):
     print(f"  Scanned   : {result.files_scanned} files")
     print(f"  Skipped   : {result.files_skipped} files")
     print(f"  Findings  : {result.total_findings} total")
+    print(f"  Errors    : {len(result.errors)}")
     print(f"{'='*60}")
 
-    if not result.findings:
-        print(f"\n{GREEN}No secrets found. Clean!{RESET}\n")
+    if result.errors:
+        print(f"\n{YELLOW}Scan incomplete; some paths could not be read:{RESET}")
+        for error in result.errors:
+            print(f"  {error}")
+
+    if not result.findings and not result.errors:
+        print(f"\n{GREEN}No secrets found in the scanned content.{RESET}\n")
         return
 
     for finding in result.findings:
@@ -409,6 +428,9 @@ Examples:
 
     if args.output:
         export_results(result, args.output, args.format)
+
+    if result.errors:
+        sys.exit(1)
 
     # Exit with non-zero code if critical findings exist (useful for CI/CD)
     if result.critical_count > 0:

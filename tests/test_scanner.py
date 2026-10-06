@@ -1,7 +1,9 @@
 import json
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +14,7 @@ from scanner import (
     ScanResult,
     build_sarif,
     export_json,
+    main,
     redact,
     sarif_rule_id,
     scan_content,
@@ -122,6 +125,8 @@ class ShouldScanFileTests(unittest.TestCase):
     def test_accepts_known_extension(self):
         self.assertTrue(should_scan_file(Path("app.py")))
         self.assertTrue(should_scan_file(Path(".env")))
+        self.assertTrue(should_scan_file(Path("private.pem")))
+        self.assertTrue(should_scan_file(Path("private.key")))
 
     def test_rejects_unknown_extension(self):
         self.assertFalse(should_scan_file(Path("photo.png")))
@@ -165,6 +170,54 @@ class ScanPathTests(unittest.TestCase):
 
             self.assertEqual(result.files_scanned, 1)
             self.assertEqual(result.total_findings, 1)
+
+    def test_direct_file_and_recursive_scans_apply_the_same_extension_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "notes.md"
+            target.write_text('AWS_KEY = "AKIAABCDEFGHIJKLMNOP"\n')
+
+            direct_result = scan_path(str(target))
+            directory_result = scan_path(tmp)
+
+            self.assertEqual(direct_result.files_scanned, 0)
+            self.assertEqual(direct_result.files_skipped, 1)
+            self.assertEqual(directory_result.files_scanned, 0)
+            self.assertEqual(directory_result.files_skipped, 1)
+
+    def test_unreadable_file_is_reported_as_scan_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "config.py"
+            target.write_text("safe\n")
+
+            with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+                result = scan_path(str(target))
+
+            self.assertEqual(result.files_scanned, 0)
+            self.assertEqual(result.files_skipped, 1)
+            self.assertEqual(len(result.errors), 1)
+            self.assertIn(str(target), result.errors[0])
+
+    def test_cli_returns_nonzero_and_reports_incomplete_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "config.py"
+            target.write_text("safe\n")
+            failed_result = ScanResult(target=str(target), errors=[f"{target}: denied"])
+
+            with patch("scanner.sys.argv", ["scanner.py", str(target)]):
+                with patch("scanner.scan_path", return_value=failed_result):
+                    output = io.StringIO()
+                    with redirect_stdout(output), self.assertRaises(SystemExit) as exit_info:
+                        main()
+
+            self.assertEqual(exit_info.exception.code, 1)
+            self.assertIn("Scan incomplete", output.getvalue())
+            self.assertIn(str(target), output.getvalue())
+
+    def test_missing_target_is_reported_as_scan_error(self):
+        result = scan_path("missing-scan-target")
+
+        self.assertEqual(result.files_scanned, 0)
+        self.assertEqual(len(result.errors), 1)
 
 
 class ScanResultTests(unittest.TestCase):
