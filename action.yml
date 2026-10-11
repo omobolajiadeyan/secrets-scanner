@@ -37,10 +37,15 @@ runs:
   using: composite
   steps:
     - name: Run secrets scan
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        SCAN_SEVERITY: ${{ inputs.severity }}
+        SCAN_OUTPUT: ${{ inputs.output }}
+        SCAN_VERIFY: ${{ inputs.verify }}
       shell: bash
       run: |
-        ARGS=(--severity "${{ inputs.severity }}" --format sarif --output "${{ inputs.output }}")
-        if [ "${{ inputs.verify }}" = "true" ]; then
-          ARGS+=(--verify)
+        SCAN_ARGS=(--severity "$SCAN_SEVERITY" --format sarif --output "$SCAN_OUTPUT")
+        if [ "$SCAN_VERIFY" = "true" ]; then
+          SCAN_ARGS+=(--verify)
         fi
-        python "${{ github.action_path }}/scanner.py" "${{ inputs.path }}" "${ARGS[@]}"
+        python "$GITHUB_ACTION_PATH/scanner.py" "$SCAN_PATH" "${SCAN_ARGS[@]}"

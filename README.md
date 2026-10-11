@@ -30,17 +30,25 @@ active, so triage effort goes to what matters first.
   and Discord credentials are still live before you triage them
 - Redacts matched values in terminal, JSON, and SARIF output — even with
   `--verify` enabled, the raw secret is never logged or written anywhere
+- Scans supported source/configuration files plus `.pem` and `.key` files,
+  applying the same extension rules to direct-file and directory scans
+- Returns exit code `1` when any requested path cannot be scanned and `2`
+  when critical findings are found
 - Exports JSON for automation and SARIF 2.1.0 for GitHub Code Scanning
 - Ships as a reusable GitHub Action
 - Includes a browser report viewer for redacted JSON evidence
 - Uses only the Python standard library
-- Returns exit code `2` when critical findings are found
+- Returns exit code `1` when any requested path cannot be scanned and `2`
+  when critical findings are found
 
 ## Project Evidence
 
 The sample evidence run scans a public-safe fixture containing fake
 credential-shaped strings, redacts matched values, and produces reviewable JSON
 and SARIF output.
+
+Unreadable files and directory traversal errors are reported as incomplete
+scans and return a non-zero exit code; they are never reported as clean.
 
 ![Secrets Scanner evidence](docs/assets/secrets-scanner-evidence.svg)
 
@@ -196,6 +204,9 @@ contains the finding type, severity, file path, line number, and redacted
 context, but not the raw secret. This holds true with `--verify` enabled too —
 see [Live Credential Verification](#live-credential-verification---verify-opt-in)
 for exactly what that flag sends over the network and what it never records.
+
+Unreadable files and directory traversal errors are reported as incomplete
+scans and return a non-zero exit code; they are never reported as clean.
 
 If you find a real secret in a repository, rotate it immediately. Removing it
 from the latest commit is not enough because it may still exist in Git history.
